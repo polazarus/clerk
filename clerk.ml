@@ -258,7 +258,8 @@ module Table = struct
   | ConfigString of string
   | ConfigInt of int
   | ConfigInt64 of int64
-  | Untyped of string option
+  | ConfigFloat of float
+  | Untyped of string
 
   type t = (string,config_type) Hashtbl.t
   
@@ -323,8 +324,8 @@ module Table = struct
         | ConfigInt i -> pp_print_char formatter '='; pp_print_string formatter (string_of_int i)
         | ConfigInt64 i -> pp_print_char formatter '='; pp_print_string formatter (Int64.to_string i)
         | ConfigString s -> pp_print_char formatter '='; print_value_string formatter s
-        | Untyped None -> ()
-        | Untyped (Some s) -> pp_print_char formatter '='; print_value_string formatter s
+        | ConfigFloat f -> pp_print_char formatter '='; pp_print_float formatter f
+        | Untyped s -> pp_print_char formatter '='; print_value_string formatter s
       in
       let print_section section pairs =
         fprintf formatter "@[<v 2>[%s]" section;
@@ -342,10 +343,7 @@ module Table = struct
   let bool_converter t name = 
     match (Hashtbl.find t name) with
     | ConfigBool b -> b
-    | Untyped None ->
-       Hashtbl.replace t name (ConfigBool true);
-       true
-    | Untyped (Some s) ->
+    | Untyped s ->
       let s = String.lowercase s in
       let b =
         if s = "true" || s="yes" || s = "on" then
@@ -365,7 +363,7 @@ module Table = struct
   let string_converter t name = 
     match (Hashtbl.find t name) with
     | ConfigString s -> s
-    | Untyped (Some s) ->
+    | Untyped s ->
         Hashtbl.replace t name (ConfigString s);
         s
     | _ -> invalid_arg "type error"
@@ -373,7 +371,7 @@ module Table = struct
   let int_converter t name = 
     match (Hashtbl.find t name) with
     | ConfigInt i -> i
-    | Untyped (Some s) ->
+    | Untyped s ->
       let i =
         try
           Int64.to_int (strtoll s)
@@ -387,15 +385,29 @@ module Table = struct
   let int64_converter t name = 
     match (Hashtbl.find t name) with
     | ConfigInt64 i -> i
-    | Untyped (Some s) ->
+    | Untyped s ->
       let i =
         try
           strtoll s
-        with Invalid_argument _->
+        with Invalid_argument _ ->
           invalid_arg "invalid int value"
       in
         Hashtbl.replace t name (ConfigInt64 i);
         i
+    | _ -> invalid_arg "type error"
+    
+  let float_converter t name =
+    match Hashtbl.find t name with
+    | ConfigFloat f -> f
+    | Untyped s ->
+      let f =
+        try
+          float_of_string s
+        with Invalid_argument _ ->
+          invalid_arg "invalid float value"
+      in
+        Hashtbl.replace t name (ConfigFloat f);
+        f
     | _ -> invalid_arg "type error"
 
   let get_generic t convertgetter name =
@@ -419,6 +431,8 @@ module Table = struct
     get_generic t int_converter name
   let get_int64 t name =
     get_generic t int64_converter name
+  let get_float t name =
+    get_generic t float_converter name
 
   let get_bool_default t name default =
     get_generic_default t bool_converter name default
@@ -428,6 +442,8 @@ module Table = struct
     get_generic_default t int_converter name default
   let get_int64_default t name default =
     get_generic_default t int64_converter name default
+  let get_float_default t name default =
+    get_generic_default t float_converter name default
 
   let set_bool t name value =
     set_generic t name (ConfigBool value)
@@ -437,8 +453,12 @@ module Table = struct
     set_generic t name (ConfigInt value)
   let set_int64 t name value =
     set_generic t name (ConfigInt64 value)
+  let set_float t name value =
+    set_generic t name (ConfigFloat value)
   let set_untyped t name value =
-    set_generic t name (Untyped value)
+    match value with
+    | Some s -> set_generic t name (Untyped s)
+    | _ -> set_generic t name (ConfigBool true)
 
   let load_channel t channel =
     Parser.parse_channel (set_untyped t) channel
@@ -468,16 +488,19 @@ let get_bool = Table.get_bool (get_default_table ())
 let get_string = Table.get_string (get_default_table ())
 let get_int = Table.get_int (get_default_table ())
 let get_int64 = Table.get_int64 (get_default_table ())
+let get_float = Table.get_float (get_default_table ())
 
 let get_bool_default = Table.get_bool_default (get_default_table ())
 let get_string_default = Table.get_string_default (get_default_table ())
 let get_int_default = Table.get_int_default (get_default_table ())
 let get_int64_default = Table.get_int64_default (get_default_table ())
+let get_float_default = Table.get_float_default (get_default_table ())
 
 let set_bool = Table.set_bool (get_default_table ())
 let set_string = Table.set_string (get_default_table ())
 let set_int = Table.set_int (get_default_table ())
 let set_int64 = Table.set_int64 (get_default_table ())
+let set_float = Table.set_float (get_default_table ())
 
 
 let load_channel = Table.load_channel (get_default_table ())

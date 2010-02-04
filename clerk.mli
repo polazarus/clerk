@@ -36,21 +36,25 @@ module Table :
     val get_string : t -> string -> string
     val get_int : t -> string -> int
     val get_int64 : t -> string -> int64
+    val get_float : t -> string -> float
 
     val get_bool_default : t -> string -> bool -> bool
     val get_string_default : t -> string -> string -> string
     val get_int_default : t -> string -> int -> int
     val get_int64_default : t -> string -> int64 -> int64
+    val get_float_default : t -> string -> float -> float
     
     val set_bool : t -> string -> bool -> unit
     val set_string : t -> string -> string -> unit
     val set_int : t -> string -> int -> unit
     val set_int64 : t -> string -> int64 -> unit
+    val set_float : t -> string -> float -> unit
 
     val load_channel : t -> in_channel -> unit
     val load : t -> string -> unit
 
     val print : Format.formatter -> t -> unit
+
     val store_channel : t -> out_channel -> unit
     val store : t -> string -> unit
   end
@@ -64,17 +68,24 @@ val get_bool : string -> bool
 val get_string : string -> string
 val get_int : string -> int
 val get_int64 : string -> int64
+val get_float : string -> float
+
 val get_bool_default : string -> bool -> bool
 val get_string_default : string -> string -> string
 val get_int_default : string -> int -> int
 val get_int64_default : string -> int64 -> int64
+val get_float_default : string -> float -> float
+
 val set_bool : string -> bool -> unit
 val set_string : string -> string -> unit
 val set_int : string -> int -> unit
 val set_int64 : string -> int64 -> unit
+val set_float : string -> float -> unit
 
 val load_channel : in_channel -> unit
 val load : string -> unit
+
 val print : Format.formatter -> unit
+
 val store_channel : out_channel -> unit
 val store : string -> unit
