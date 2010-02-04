@@ -1,0 +1,61 @@
+Clerk: a Git-like configuration file loader for OCaml
+Mickaël Delahaye
+
+* Usage
+
+Simply compile clerk.mli and clerk.ml as any other OCaml file.
+
+Clerk.load "~/.gitconfig";
+let user_name = Clerk.get_string "user.name";;
+
+* Configuration file format
+
+See man git-config.
+
+cat > test.config <<EOF
+[Section1]
+  a =              true
+  b = X\
+Y\
+Z
+
+[section1 "Subsection A"]
+  N = 1
+
+[section2.subSECTION-B]
+  t = yes
+EOF
+
+Clerk.load "test.config"
+Clerk.get_bool "section1.a" (* lower case for section *)
+-> true
+Clerk.get_bool "section1.a" (* lower case for section *)
+-> true
+Clerk.get_int "section1.Subsection A.n" (* lower case for variable *)
+-> 1
+Clerk.get_string "section1.Subsection A.n" (* lower case for variable *)
+-> 1
+Clerk.get_bool "section1.subsection-b.t" (* lower case for unquoted subsection *)
+-> true (* yes, on, and 1 are true, whereas no, off, and 0 are false *)
+
+
+* WARNING
+
+Hardly tested and only under Linux!
+
+* License *
+
+Copyright (c) 2010, Mickaël Delahaye <mickael.delahaye@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED “AS IS” AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
