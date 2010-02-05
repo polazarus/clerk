@@ -58,10 +58,12 @@ let strtoll s =
   done;
   if positive then !res else (Int64.neg !res)
 
+exception ParsingError of string
 
 (* Parsing *)  
 
 module Parser = struct
+
   let rec skip_line stream =
     match Stream.peek stream with
     | None -> ()
@@ -95,11 +97,11 @@ module Parser = struct
       | '\n' -> ()
       | '\r' when Stream.next stream = '\n' -> ()
       | _ ->
-        failwith "unknown escape sequence in value"
+        raise (ParsingError "Unknown escape sequence in quoted value")
       end;
       add_value_in_quote buff stream
     | '\n' ->
-      failwith "unexpected end of line in value" 
+      raise (ParsingError "Unexpected end of line in value")
     | c ->
       Buffer.add_char buff c;
       add_value_in_quote buff stream
@@ -122,10 +124,12 @@ module Parser = struct
         | ' ' | '\t' | '\r' | '\x0C' | '\x0B' ->
           let spaces = if Buffer.length buff > offset then spaces +1 else spaces in
           read_value buff stream offset spaces
+        (* extension *)
         | '"' ->
           add_spaces ();
           add_value_in_quote buff stream;
           read_value buff stream offset 0
+        (* /extension *)
         | '#' | ';' ->
           skip_line stream;
           get_and_clear buff
@@ -144,7 +148,7 @@ module Parser = struct
               read_value buff stream (Buffer.length buff) 0
             | '\r' when Stream.next stream = '\n' ->
               read_value buff stream (Buffer.length buff) 0
-            | _ -> failwith "unknown escape sequence in value"
+            | _ -> raise (ParsingError "Unknown escape sequence in value")
           end
         | c ->
           add_spaces ();
@@ -158,7 +162,8 @@ module Parser = struct
     | Some c ->
       Stream.junk stream;
       match c with
-      | ('A'..'Z' | 'a'..'z' | '0'..'9' | '-' | '.')  as c->
+      | ( 'A'..'Z' | 'a'..'z' | '0'..'9' | '-' | '.'
+        (* extension *) | '_' (* /extension *) )  as c->
         Buffer.add_char buff (Char.lowercase c);
         read_assign buff stream
       | '\n' ->
@@ -170,46 +175,51 @@ module Parser = struct
           | Some '=' -> Stream.junk stream; Some (read_value buff stream 0 0)
           | Some ('\r' | '\n') -> Stream.junk stream; None
           | None -> None
-          | _ -> failwith "invalid character after variable name ('=' or line break expected)"
+          | _ -> raise (ParsingError "Invalid character after variable name ('=' or line break expected)")
         in
           name, value
-      | _ -> failwith "invalid character after variable name ('=' or line break expected)"
+      | _ -> raise (ParsingError "Invalid character after variable name ('=' or line break expected)")
 
-  let rec read_extended_section_rec buff stream =
+  let rec read_extended_section buff stream =
     match Stream.next stream with
     | '"' ->
       ()
     | '\n' ->
-      failwith "invalid character in section (unexpected line break)"
+      raise (ParsingError "Invalid character in section (unexpected line break)")
     | '\\' ->
       let c = Stream.next stream in
       if c = '\n' then
-        failwith "invalid character in section (unexpected line break)";
+        raise (ParsingError "Invalid character in section (unexpected line break)");
       Buffer.add_char buff c;
-      read_extended_section_rec buff stream
+      read_extended_section buff stream
     | c ->
       Buffer.add_char buff c;
-      read_extended_section_rec buff stream
+      read_extended_section buff stream
 
   let rec read_section buff stream =
     match Stream.next stream with
     | ']'  ->
       get_and_clear buff
-    | ' '  | '\n' | '\t' | '\r' | '\x0C' | '\x0B' ->
+    | '"' ->
+      read_extended_section buff stream;
+      read_section buff stream
+    | ' ' | '\t' | '\r' | '\x0C' | '\x0B' ->
       skip_space stream;
       begin match Stream.next stream with
       | '\"' ->
         Buffer.add_char buff '.';
-        read_extended_section_rec buff stream;
+        read_extended_section buff stream;
         read_section buff stream
       | _ ->
-        failwith "invalid character in section ('\"' expected)";
+        raise (ParsingError "Invalid character in section name ('\"' expected)");
       end
-    | ('A'..'Z' | 'a'..'z' | '0'..'9' | '-' | '.') as c ->
+    | ('A'..'Z' | 'a'..'z' | '0'..'9' | '-' | '.'
+    (* extension *) | '_' (* /extension *)
+    ) as c ->
       Buffer.add_char buff (Char.lowercase c);
       read_section buff stream
     | _ ->
-      failwith "invalid character in section"
+      raise (ParsingError "Invalid character in section name")
 
   let rec parse_rec f buff stream section =
     match Stream.peek stream with
@@ -224,6 +234,9 @@ module Parser = struct
         parse_rec f buff stream (read_section buff stream)
       | ' '  | '\n' | '\t' | '\r' | '\x0C' | '\x0B' ->
         parse_rec f buff stream section
+      (* extension *)
+      | '0'..'9' | '-' | '_'
+      (* /extension*)
       | 'A'..'Z' | 'a'..'z' ->
         Buffer.add_string buff section;
         Buffer.add_char buff '.';
@@ -232,14 +245,14 @@ module Parser = struct
           f name value;
           parse_rec f buff stream section
       | _ ->
-        failwith "invalid character"
+        raise (ParsingError "Invalid character")
 
   let parse_stream f stream =
     let buff = Buffer.create 256 in
     try
       parse_rec f buff stream ""
     with Stream.Failure ->
-      failwith "unexpected end of file"
+      raise (ParsingError "Unexpected end of file")
 
   let parse_channel f input =
     parse_stream f (Stream.of_channel input)
@@ -413,7 +426,7 @@ module Table = struct
     if Hashtbl.mem t name then
       convertgetter t name
     else
-      invalid_arg "invalid name"
+      invalid_arg ("invalid name: "^ name)
   let get_generic_default t convertgetter name default =
     if Hashtbl.mem t name then
       convertgetter t name

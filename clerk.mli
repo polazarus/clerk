@@ -16,6 +16,8 @@ THIS SOFTWARE.
 
 (** Clerk: a Git-like configuration file loader for OCaml *)
 
+exception ParsingError of string
+
 (** Parser module *)
 module Parser :
   sig
@@ -61,34 +63,53 @@ module Table :
 
 (** Shortcuts working with a default table *)
 
+(** Module type to ease Clerk inclusion *)
 module type S = sig
+
+  (** Get the default configuration table *)
   val get_default_table : unit -> Table.t
+
+  (** Set the default configuration table *)
   val set_default_table : Table.t -> unit
 
+  (** Get a configuration option *)
   val get_bool : string -> bool
   val get_string : string -> string
   val get_int : string -> int
   val get_int64 : string -> int64
   val get_float : string -> float
 
+  (** Get a configuration option with a default value *)
   val get_bool_default : string -> bool -> bool
   val get_string_default : string -> string -> string
   val get_int_default : string -> int -> int
   val get_int64_default : string -> int64 -> int64
   val get_float_default : string -> float -> float
 
+  (** Set a configuration option *)
   val set_bool : string -> bool -> unit
   val set_string : string -> string -> unit
   val set_int : string -> int -> unit
   val set_int64 : string -> int64 -> unit
   val set_float : string -> float -> unit
 
+  (**
+    Load configuration into the default configuration file from a channel.
+    Raise ParsingError if an error occurs during the parsing.
+  *)
   val load_channel : in_channel -> unit
+  (**
+    Load configuration into the default configuration file from a file.
+    Raise ParsingError if an error occurs during the parsing.
+  *)
   val load : string -> unit
 
+  (** Print the default configuration table to a formatter. *)
   val print : Format.formatter -> unit
 
+  (** Store the default configuration table into a channel. *)
   val store_channel : out_channel -> unit
+  (** Store the default configuration table into a file. *)
   val store : string -> unit
 end
 
