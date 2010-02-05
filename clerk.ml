@@ -14,7 +14,6 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 *)
 
-
 (** An extended strtoll *)
 let strtoll s =
   let l = String.length s and i = ref 0 in
@@ -472,6 +471,38 @@ module Table = struct
 
   let store t filepath =
     store_channel t (open_out filepath)
+end
+
+(* A module type to facilitate Clerk inclusion *)
+module type S = sig
+  val get_default_table : unit -> Table.t
+  val set_default_table : Table.t -> unit
+
+  val get_bool : string -> bool
+  val get_string : string -> string
+  val get_int : string -> int
+  val get_int64 : string -> int64
+  val get_float : string -> float
+
+  val get_bool_default : string -> bool -> bool
+  val get_string_default : string -> string -> string
+  val get_int_default : string -> int -> int
+  val get_int64_default : string -> int64 -> int64
+  val get_float_default : string -> float -> float
+
+  val set_bool : string -> bool -> unit
+  val set_string : string -> string -> unit
+  val set_int : string -> int -> unit
+  val set_int64 : string -> int64 -> unit
+  val set_float : string -> float -> unit
+
+  val load_channel : in_channel -> unit
+  val load : string -> unit
+
+  val print : Format.formatter -> unit
+
+  val store_channel : out_channel -> unit
+  val store : string -> unit
 end
 
 let default_table = ref None
