@@ -85,20 +85,26 @@ module Parser = struct
       Stream.junk stream; skip_horizontal_space stream
     | _ -> ()
 
+  let add_escape_sequence buff stream =
+    match Stream.next stream with
+    | ('\\' | '\"') as c ->
+      Buffer.add_char buff c
+    | 't' ->
+      Buffer.add_char buff '\t'
+    | 'n' ->
+      Buffer.add_char buff '\n'
+    | 'b' ->
+      Buffer.add_char buff '\b'
+    | '\n' -> ()
+    | '\r' when Stream.next stream = '\n' -> ()
+    | _ ->
+      raise (ParsingError "Unknown escape sequence")
+
   let rec add_value_in_quote buff stream =
     match Stream.next stream with
     | '\"' -> ()
     | '\\' ->
-      begin match Stream.next stream with
-      | ('\\' | '\"') as c ->  Buffer.add_char buff c
-      | 't' -> Buffer.add_char buff '\t'
-      | 'n' -> Buffer.add_char buff '\n'
-      | 'b' -> Buffer.add_char buff '\b'
-      | '\n' -> ()
-      | '\r' when Stream.next stream = '\n' -> ()
-      | _ ->
-        raise (ParsingError "Unknown escape sequence in quoted value")
-      end;
+      add_escape_sequence buff stream;
       add_value_in_quote buff stream
     | '\n' ->
       raise (ParsingError "Unexpected end of line in value")
@@ -111,7 +117,7 @@ module Parser = struct
       Buffer.clear buff;
       v
 
-  let rec read_value buff stream offset spaces =
+  let rec read_value buff stream spaces =
     match Stream.peek stream with
     | None ->
       get_and_clear buff
@@ -122,38 +128,24 @@ module Parser = struct
         | '\n' ->
           get_and_clear buff
         | ' ' | '\t' | '\r' | '\x0C' | '\x0B' ->
-          let spaces = if Buffer.length buff > offset then spaces +1 else spaces in
-          read_value buff stream offset spaces
+          read_value buff stream (if Buffer.length buff > 0 then spaces +1 else spaces)
         (* extension *)
         | '"' ->
           add_spaces ();
           add_value_in_quote buff stream;
-          read_value buff stream offset 0
+          read_value buff stream 0
         (* /extension *)
         | '#' | ';' ->
           skip_line stream;
           get_and_clear buff
         | '\\' ->
           add_spaces ();
-          begin match Stream.next stream with
-            | ('\\' | '\"') as c ->
-              Buffer.add_char buff c; read_value buff stream offset 0
-            | 't' ->
-              Buffer.add_char buff '\t'; read_value buff stream offset 0
-            | 'n' ->
-              Buffer.add_char buff '\n'; read_value buff stream offset 0
-            | 'b' ->
-              Buffer.add_char buff '\b'; read_value buff stream offset 0
-            | '\n' ->
-              read_value buff stream (Buffer.length buff) 0
-            | '\r' when Stream.next stream = '\n' ->
-              read_value buff stream (Buffer.length buff) 0
-            | _ -> raise (ParsingError "Unknown escape sequence in value")
-          end
+          add_escape_sequence buff stream;
+          read_value buff stream 0
         | c ->
           add_spaces ();
           Buffer.add_char buff c;
-          read_value buff stream offset 0
+          read_value buff stream 0
 
   let rec read_assign buff stream =
     match Stream.peek stream with
@@ -172,7 +164,7 @@ module Parser = struct
         skip_horizontal_space stream;
         let name = get_and_clear buff
         and value = match Stream.peek stream with
-          | Some '=' -> Stream.junk stream; Some (read_value buff stream 0 0)
+          | Some '=' -> Stream.junk stream; Some (read_value buff stream 0)
           | Some ('\r' | '\n') -> Stream.junk stream; None
           | None -> None
           | _ -> raise (ParsingError "Invalid character after variable name ('=' or line break expected)")
