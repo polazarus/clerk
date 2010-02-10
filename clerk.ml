@@ -170,6 +170,9 @@ module Parser = struct
           | _ -> raise (ParsingError "Invalid character after variable name ('=' or line break expected)")
         in
           name, value
+      | '=' ->
+        let name = get_and_clear buff in
+          name, Some (read_value buff stream 0)
       | _ -> raise (ParsingError "Invalid character after variable name ('=' or line break expected)")
 
   let rec read_extended_section buff stream =
