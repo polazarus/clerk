@@ -5,8 +5,10 @@ Mickaël Delahaye
 
 Simply compile clerk.mli and clerk.ml as any other OCaml file.
 
-Clerk.load "~/.gitconfig";
-let user_name = Clerk.get_string "user.name";;
+let t = Clerk.make ();;
+Clerk.load t "~/.gitconfig";
+let user_name_param = Clerk.mk_string t "user.name";;
+let user_name = Clerk.get user_name_param;;
 
 * Configuration file format
 
@@ -26,16 +28,13 @@ Z
   t = yes
 EOF
 
-Clerk.load "test.config"
-Clerk.get_bool "section1.a" (* lower case for section *)
+let t = Clerk.make ();;
+Clerk.load t "test.config";;
+Clerk.get (Clerk.mk_bool t "section1.a") (* lower case for section *);;
 -> true
-Clerk.get_bool "section1.a" (* lower case for section *)
--> true
-Clerk.get_int "section1.Subsection A.n" (* lower case for variable *)
+Clerk.get (Clerk.mk_int t "section1.Subsection A.n") (* lower case for variable *);;
 -> 1
-Clerk.get_string "section1.Subsection A.n" (* lower case for variable *)
--> 1
-Clerk.get_bool "section1.subsection-b.t" (* lower case for unquoted subsection *)
+Clerk.get (Clerk.mk_bool t "section2.subsection-b.t") (* lower case for unquoted subsection *);;
 -> true (* yes, on, and 1 are true, whereas no, off, and 0 are false *)
 
 

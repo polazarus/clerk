@@ -58,11 +58,11 @@ let strtoll s =
   done;
   if positive then !res else (Int64.neg !res)
 
-exception ParsingError of string
-
 (* Parsing *)  
 
 module Parser = struct
+
+  exception ParsingError of string
 
   let rec skip_line stream =
     match Stream.peek stream with
@@ -253,297 +253,259 @@ module Parser = struct
     parse_stream f (Stream.of_channel input)
 end
 
+(** Parameter *)
+type 'a parameter = 'a option ref
 
-(* Configuration table *)
+(** Get parameter's value *)
+let get p =
+  match !p with
+  | Some value -> value
+  | None -> raise Not_found
 
-module Table = struct
+(** Replace paramter's value *)
+let set p value =
+  p := Some value
 
-  let default_default_table_size = 50
-  
-  type config_type =
-  | ConfigBool of bool
-  | ConfigString of string
-  | ConfigInt of int
-  | ConfigInt64 of int64
-  | ConfigFloat of float
-  | Untyped of string
 
-  type t = (string,config_type) Hashtbl.t
-  
+(** Configuration table *)
+
+let default_default_table_size = 50
+
+type typedparam =
+  Int of int parameter
+| Int64 of int64 parameter
+| Bool of bool parameter
+| String of string parameter
+| Float of float parameter
+
+type tablevalue =
+| Untyped of string option list
+| Simple of typedparam
+
+type t = (string, tablevalue) Hashtbl.t
+type table = t
+
 
 (* Pretty printing *)
 
-  module Printer = struct
-    open Format
+module Printer = struct
+  open Format
 
-    let must_quote s l=
-      if l = 0 then
-        true
-      else
-        let i = ref 0 and quote = ref false in
-        while not !quote && !i < l do
-          match s.[!i] with
-          | ' '  | '\n' | '\t' | '\r' | '\x0C' | '\x0B' | '#' | ';' | '[' | '=' | '"' ->
-            quote := true
-          | _ -> incr i
-        done;
-        !quote
-        
-    let print_value_string formatter s =
-      let l = String.length s in
-      if must_quote s l then begin
-        pp_print_char formatter '"';
-        for i = 0 to l-1 do
-          match s.[i] with
-          | ('"' | '\\' as c) ->
-            pp_print_char formatter '\\'; pp_print_char formatter c
-          | '\n' ->
-            pp_print_string formatter "\\n"
-          | '\t' ->
-            pp_print_string formatter "\\t"
-          | '\b' ->
-            pp_print_string formatter "\\b"
-          | c ->
-            pp_print_char formatter c
-        done;
-        pp_print_char formatter '"';
-      end else
-        pp_print_string formatter s
-        
-    
-    let print formatter table =
-      let sections = Hashtbl.create 10 in
-      let add_section name value =
-        let section,name =
-          let l = String.length name and i = String.rindex name '.' in
-            String.sub name 0 i, String.sub name (i+1) (l-i-1)
-        in
-          if Hashtbl.mem sections section then
-            Hashtbl.replace sections section ((name,value)::(Hashtbl.find sections section))
-          else
-            Hashtbl.add sections section [name,value]
+  let must_quote s l=
+    if l = 0 then
+      true
+    else
+      let i = ref 0 and quote = ref false in
+      while not !quote && !i < l do
+        match s.[!i] with
+        | ' '  | '\n' | '\t' | '\r' | '\x0C' | '\x0B' | '#' | ';' | '[' | '=' | '"' ->
+          quote := true
+        | _ -> incr i
+      done;
+      !quote
+      
+  let print_value_string formatter s =
+    let l = String.length s in
+    if must_quote s l then begin
+      pp_print_char formatter '"';
+      for i = 0 to l-1 do
+        match s.[i] with
+        | ('"' | '\\' as c) ->
+          pp_print_char formatter '\\'; pp_print_char formatter c
+        | '\n' ->
+          pp_print_string formatter "\\n"
+        | '\t' ->
+          pp_print_string formatter "\\t"
+        | '\b' ->
+          pp_print_string formatter "\\b"
+        | c ->
+          pp_print_char formatter c
+      done;
+      pp_print_char formatter '"';
+    end else
+      pp_print_string formatter s
+
+  let print_pair f (name,value) = 
+    match value with
+    | Simple (Int {contents=Some value}) ->
+      fprintf f "@,@[<hov 2>%s =@ %d@]" name value
+    | Simple (Int64 {contents=Some value}) ->
+      fprintf f "@,@[<hov 2>%s =@ %s@]" name (Int64.to_string value)
+    | Simple (Bool {contents=Some value}) ->
+      fprintf f "@,@[<hov 2>%s =@ %B@]" name value
+    | Simple (Float {contents=Some value}) ->
+      fprintf f "@,@[<hov 2>%s =@ %f@]" name value
+    | Simple (String {contents=Some value}) ->
+      fprintf f "@,@[<hov 2>%s =@ %a@]" name print_value_string value
+    | Simple _ ->
+      ()
+    | Untyped l ->
+      let print s =
+        match s with
+        | Some s -> fprintf f "@,@[<hov 2>%s=%s@]" name s
+        | None -> fprintf f "@,@[<hov 2>%s@]" name
       in
-        Hashtbl.iter add_section table;
-      let convert formatter value = 
-        match value with
-        | ConfigBool true -> pp_print_string formatter "=true"
-        | ConfigBool false -> pp_print_string formatter "=false"
-        | ConfigInt i -> pp_print_char formatter '='; pp_print_string formatter (string_of_int i)
-        | ConfigInt64 i -> pp_print_char formatter '='; pp_print_string formatter (Int64.to_string i)
-        | ConfigString s -> pp_print_char formatter '='; print_value_string formatter s
-        | ConfigFloat f -> pp_print_char formatter '='; pp_print_float formatter f
-        | Untyped s -> pp_print_char formatter '='; print_value_string formatter s
+        List.iter print (List.rev l)
+  
+  let print formatter table =
+    let sections = Hashtbl.create 10 in
+    let add_section name value =
+      let section,name =
+        let l = String.length name and i = String.rindex name '.' in
+          String.sub name 0 i, String.sub name (i+1) (l-i-1)
       in
-      let print_section section pairs =
-        fprintf formatter "@[<v 2>[%s]" section;
-        List.iter (fun (name,value) -> fprintf formatter "@,@[<hov 2>%s%a@]" name convert value) (List.rev pairs);
-        fprintf formatter "@]@."
-      in
-        Hashtbl.iter print_section sections
-  end
+        if Hashtbl.mem sections section then
+          Hashtbl.replace sections section ((name,value)::(Hashtbl.find sections section))
+        else
+          Hashtbl.add sections section [name,value]
+    in
+      Hashtbl.iter add_section table;
+    let print_section section pairs =
+      fprintf formatter "@[<v 2>[%s]" section;
+      List.iter (print_pair formatter) (List.rev pairs);
+      fprintf formatter "@]@."
+    in
+      Hashtbl.iter print_section sections
+end
 
 (* All the rest *)
 
-  let make ?(size=default_default_table_size) () =
-    Hashtbl.create size
+(** Make a configuration table *)
+let make ?(size=default_default_table_size) () =
+  Hashtbl.create size
 
-  let bool_converter t name = 
-    match (Hashtbl.find t name) with
-    | ConfigBool b -> b
-    | Untyped s ->
-      let s = String.lowercase s in
-      let b =
-        if s = "true" || s="yes" || s = "on" then
-          true
-        else if s = "" || s = "false" || s = "no" || s = "off" then
-          false
-        else
-          try
-            strtoll s <> 0L
-          with Invalid_argument _->
-            invalid_arg "invalid boolean value"
-      in
-        Hashtbl.replace t name (ConfigBool b);
-        b
-    | _ -> invalid_arg "type error"
-  
-  let string_converter t name = 
-    match (Hashtbl.find t name) with
-    | ConfigString s -> s
-    | Untyped s ->
-        Hashtbl.replace t name (ConfigString s);
-        s
-    | _ -> invalid_arg "type error"
-
-  let int_converter t name = 
-    match (Hashtbl.find t name) with
-    | ConfigInt i -> i
-    | Untyped s ->
-      let i =
+(** Conversion *)
+let bool_convert s =
+  match s with
+  | None -> true
+  | Some s ->
+    let s = String.lowercase s in
+      if s = "true" || s = "yes" || s = "on" then
+        true
+      else if s = "" || s = "false" || s = "no" || s = "off" then
+        false
+      else
         try
-          Int64.to_int (strtoll s)
+          strtoll s <> 0L
         with Invalid_argument _->
-          invalid_arg "invalid int value"
-      in
-        Hashtbl.replace t name (ConfigInt i);
-        i
-    | _ -> invalid_arg "type error"
+          failwith "invalid boolean value"
+let option_value s =
+  match s with Some s -> s | None -> failwith "a value was expected"
+let string_convert s = 
+  option_value s
+let int_convert s = 
+  try
+    Int64.to_int (strtoll (option_value s))
+  with Invalid_argument _->
+    failwith "invalid int value"
+let int64_convert s = 
+  try
+    strtoll (option_value s)
+  with Invalid_argument _ ->
+    failwith "invalid int value"
+let float_convert s =
+  try
+    float_of_string (option_value s)
+  with Invalid_argument _ ->
+    invalid_arg "invalid float value"
 
-  let int64_converter t name = 
-    match (Hashtbl.find t name) with
-    | ConfigInt64 i -> i
-    | Untyped s ->
-      let i =
-        try
-          strtoll s
-        with Invalid_argument _ ->
-          invalid_arg "invalid int value"
-      in
-        Hashtbl.replace t name (ConfigInt64 i);
-        i
-    | _ -> invalid_arg "type error"
-    
-  let float_converter t name =
+let get_param t (wrap, unwrap, make) name =
+  if Hashtbl.mem t name then
     match Hashtbl.find t name with
-    | ConfigFloat f -> f
-    | Untyped s ->
-      let f =
-        try
-          float_of_string s
-        with Invalid_argument _ ->
-          invalid_arg "invalid float value"
-      in
-        Hashtbl.replace t name (ConfigFloat f);
-        f
-    | _ -> invalid_arg "type error"
+    | Untyped l ->
+      let param = make l in
+        Hashtbl.replace t name (wrap param);
+        param
+    | wrapped_param ->
+      unwrap wrapped_param
+  else
+    let param = make [] in
+      Hashtbl.replace t name (wrap param);
+      param  
 
-  let get_generic t convertgetter name =
-    if Hashtbl.mem t name then
-      convertgetter t name
-    else
-      invalid_arg ("invalid name: "^ name)
-  let get_generic_default t convertgetter name default =
-    if Hashtbl.mem t name then
-      convertgetter t name
-    else
-      default
-  let set_generic t (name : string) value =
-      Hashtbl.replace t name value
+let mk_generic t (wrap, unwrap, make) name default_value =
+  let param = get_param t (wrap, unwrap, make) name in
+    if !param = None then
+      param := default_value;
+    param
 
-  let get_bool t name =
-    get_generic t bool_converter name
-  let get_string t name =
-    get_generic t string_converter name
-  let get_int t name =
-    get_generic t int_converter name
-  let get_int64 t name =
-    get_generic t int64_converter name
-  let get_float t name =
-    get_generic t float_converter name
+let make_unique convert values =
+  let initial_value = match values with
+    | [] -> None
+    | head :: _ -> Some (convert head)
+  in
+    ref initial_value
 
-  let get_bool_default t name default =
-    get_generic_default t bool_converter name default
-  let get_string_default t name default =
-    get_generic_default t string_converter name default
-  let get_int_default t name default =
-    get_generic_default t int_converter name default
-  let get_int64_default t name default =
-    get_generic_default t int64_converter name default
-  let get_float_default t name default =
-    get_generic_default t float_converter name default
+let make_list convert values =
+  let values = List.rev_map (convert values) in
+    ref values
 
-  let set_bool t name value =
-    set_generic t name (ConfigBool value)
-  let set_string t name value =
-    set_generic t name (ConfigString value)
-  let set_int t name value =
-    set_generic t name (ConfigInt value)
-  let set_int64 t name value =
-    set_generic t name (ConfigInt64 value)
-  let set_float t name value =
-    set_generic t name (ConfigFloat value)
-  let set_untyped t name value =
-    match value with
-    | Some s -> set_generic t name (Untyped s)
-    | _ -> set_generic t name (ConfigBool true)
+let wrap_int p = Simple (Int p)
+let wrap_int64 p = Simple (Int64 p)
+let wrap_bool p = Simple (Bool p)
+let wrap_float p = Simple (Float p)
+let wrap_string p = Simple (String p)
 
-  let load_channel t channel =
-    Parser.parse_channel (set_untyped t) channel
-  let load t filepath =
-    load_channel t (open_in filepath)
-
-  let print = Printer.print
-
-  let store_channel t channel =
-    Printer.print (Format.formatter_of_out_channel channel) t
-
-  let store t filepath =
-    store_channel t (open_out filepath)
-end
-
-(* A module type to facilitate Clerk inclusion *)
-module type S = sig
-  val get_default_table : unit -> Table.t
-  val set_default_table : Table.t -> unit
-
-  val get_bool : string -> bool
-  val get_string : string -> string
-  val get_int : string -> int
-  val get_int64 : string -> int64
-  val get_float : string -> float
-
-  val get_bool_default : string -> bool -> bool
-  val get_string_default : string -> string -> string
-  val get_int_default : string -> int -> int
-  val get_int64_default : string -> int64 -> int64
-  val get_float_default : string -> float -> float
-
-  val set_bool : string -> bool -> unit
-  val set_string : string -> string -> unit
-  val set_int : string -> int -> unit
-  val set_int64 : string -> int64 -> unit
-  val set_float : string -> float -> unit
-
-  val load_channel : in_channel -> unit
-  val load : string -> unit
-
-  val print : Format.formatter -> unit
-
-  val store_channel : out_channel -> unit
-  val store : string -> unit
-end
-
-let default_table = ref None
-
-let get_default_table () =
-    match !default_table with
-    | None -> let t = Table.make () in default_table := Some t; t
-    | Some t -> t
-
-let set_default_table table =
-  default_table := Some table
-
-let get_bool = Table.get_bool (get_default_table ())
-let get_string = Table.get_string (get_default_table ())
-let get_int = Table.get_int (get_default_table ())
-let get_int64 = Table.get_int64 (get_default_table ())
-let get_float = Table.get_float (get_default_table ())
-
-let get_bool_default = Table.get_bool_default (get_default_table ())
-let get_string_default = Table.get_string_default (get_default_table ())
-let get_int_default = Table.get_int_default (get_default_table ())
-let get_int64_default = Table.get_int64_default (get_default_table ())
-let get_float_default = Table.get_float_default (get_default_table ())
-
-let set_bool = Table.set_bool (get_default_table ())
-let set_string = Table.set_string (get_default_table ())
-let set_int = Table.set_int (get_default_table ())
-let set_int64 = Table.set_int64 (get_default_table ())
-let set_float = Table.set_float (get_default_table ())
+let unwrap_int tp =
+  match tp with
+  | Simple (Int p) -> p 
+  | _ -> failwith "type error"
+let unwrap_int64 tp =
+  match tp with
+  | Simple (Int64 p) -> p 
+  | _ -> failwith "type error"
+let unwrap_bool tp =
+  match tp with
+  | Simple (Bool p) -> p 
+  | _ -> failwith "type error"
+let unwrap_float tp =
+  match tp with
+  | Simple (Float p) -> p 
+  | _ -> failwith "type error"
+let unwrap_string tp =
+  match tp with
+  | Simple (String p) -> p 
+  | _ -> failwith "type error"
 
 
-let load_channel = Table.load_channel (get_default_table ())
-let load = Table.load (get_default_table ())
-let print formatter= Table.print formatter (get_default_table ())
-let store_channel = Table.store_channel (get_default_table ())
-let store = Table.store (get_default_table ())
+let mk_int t ?default name =
+  mk_generic t (wrap_int, unwrap_int, make_unique int_convert) name default
+let mk_int64 t ?default name =
+  mk_generic t (wrap_int64, unwrap_int64, make_unique int64_convert) name default
+let mk_bool t ?default name =
+  mk_generic t (wrap_bool, unwrap_bool, make_unique bool_convert) name default
+let mk_float t ?default name =
+  mk_generic t (wrap_float, unwrap_float, make_unique float_convert) name default
+let mk_string t ?default name =
+  mk_generic t (wrap_string, unwrap_string, make_unique string_convert) name default
+
+let update_simple tp valueopt =
+  match tp with
+  | Int p -> p := Some (int_convert valueopt)
+  | Int64 p -> p := Some (int64_convert valueopt)
+  | Bool p -> p := Some (bool_convert valueopt)
+  | Float p -> p := Some (float_convert valueopt)
+  | String p -> p := Some (string_convert valueopt)
+
+let load_one t name valueopt =
+  if Hashtbl.mem t name then
+    match Hashtbl.find t name with
+    | Untyped l -> Hashtbl.replace t name (Untyped (valueopt :: l))
+    | Simple tp -> update_simple tp valueopt
+  else
+    Hashtbl.add t name (Untyped [valueopt])
+
+let load_channel t channel =
+  Parser.parse_channel (load_one t) channel
+let load_file t filepath =
+  load_channel t (open_in filepath)
+let load t stream =
+  Parser.parse_stream (load_one t) stream
+
+let print = Printer.print
+
+let store_channel t channel =
+  Printer.print (Format.formatter_of_out_channel channel) t
+
+let store t filepath =
+  store_channel t (open_out filepath)

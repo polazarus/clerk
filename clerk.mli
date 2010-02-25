@@ -16,101 +16,55 @@ THIS SOFTWARE.
 
 (** Clerk: a Git-like configuration file loader for OCaml *)
 
-exception ParsingError of string
+
+(** Generic parameter *)
+type 'a parameter
+
+(** Get a parameter's current value. Raises {!Not_found} if no value is assigned to this parameter. *)
+val get : 'a parameter -> 'a
+(** Set a parameter value *)
+val set : 'a parameter -> 'a -> unit
+
+
+(** Configuration table type*)
+type t
+type table = t
 
 (** Parser module *)
 module Parser :
   sig
+  
+    exception ParsingError of string
+
     val parse_stream :
       (string -> string option -> unit) -> char Stream.t -> unit
     val parse_channel :
       (string -> string option -> unit) -> in_channel -> unit
   end
 
-(** Table module *)
-module Table :
-  sig
-    type t
+(** Make a configuration table. Optional hint size. *)
+val make : ?size:int -> unit -> t
 
-    val make : ?size:int -> unit -> t
+(** Extracting parameters *)
 
-    val get_bool : t -> string -> bool
-    val get_string : t -> string -> string
-    val get_int : t -> string -> int
-    val get_int64 : t -> string -> int64
-    val get_float : t -> string -> float
+val mk_bool : t -> ?default:bool -> string -> bool parameter
+val mk_string : t -> ?default:string -> string -> string parameter
+val mk_int : t -> ?default:int -> string -> int parameter
+val mk_int64 : t -> ?default:int64 -> string -> int64 parameter
+val mk_float : t -> ?default:float -> string -> float parameter
 
-    val get_bool_default : t -> string -> bool -> bool
-    val get_string_default : t -> string -> string -> string
-    val get_int_default : t -> string -> int -> int
-    val get_int64_default : t -> string -> int64 -> int64
-    val get_float_default : t -> string -> float -> float
-    
-    val set_bool : t -> string -> bool -> unit
-    val set_string : t -> string -> string -> unit
-    val set_int : t -> string -> int -> unit
-    val set_int64 : t -> string -> int64 -> unit
-    val set_float : t -> string -> float -> unit
+(** Loading *)
 
-    val load_channel : t -> in_channel -> unit
-    val load : t -> string -> unit
+(** Load configurations from an input channel into a configuration table *)
+val load_channel : t -> in_channel -> unit
+(** Load configurations from an file into a configuration table *)
+val load_file : t -> string -> unit
+(** Load configurations form a character stream into a configuration table *)
+val load : t -> char Stream.t -> unit
 
-    val print : Format.formatter -> t -> unit
+(** Printing and storing *)
 
-    val store_channel : t -> out_channel -> unit
-    val store : t -> string -> unit
-  end
+val print : Format.formatter -> t -> unit
 
-(** Shortcuts working with a default table *)
-
-(** Module type to ease Clerk inclusion *)
-module type S = sig
-
-  (** Get the default configuration table *)
-  val get_default_table : unit -> Table.t
-
-  (** Set the default configuration table *)
-  val set_default_table : Table.t -> unit
-
-  (** Get a configuration option *)
-  val get_bool : string -> bool
-  val get_string : string -> string
-  val get_int : string -> int
-  val get_int64 : string -> int64
-  val get_float : string -> float
-
-  (** Get a configuration option with a default value *)
-  val get_bool_default : string -> bool -> bool
-  val get_string_default : string -> string -> string
-  val get_int_default : string -> int -> int
-  val get_int64_default : string -> int64 -> int64
-  val get_float_default : string -> float -> float
-
-  (** Set a configuration option *)
-  val set_bool : string -> bool -> unit
-  val set_string : string -> string -> unit
-  val set_int : string -> int -> unit
-  val set_int64 : string -> int64 -> unit
-  val set_float : string -> float -> unit
-
-  (**
-    Load configuration into the default configuration file from a channel.
-    Raise ParsingError if an error occurs during the parsing.
-  *)
-  val load_channel : in_channel -> unit
-  (**
-    Load configuration into the default configuration file from a file.
-    Raise ParsingError if an error occurs during the parsing.
-  *)
-  val load : string -> unit
-
-  (** Print the default configuration table to a formatter. *)
-  val print : Format.formatter -> unit
-
-  (** Store the default configuration table into a channel. *)
-  val store_channel : out_channel -> unit
-  (** Store the default configuration table into a file. *)
-  val store : string -> unit
-end
-
-include S
+val store_channel : t -> out_channel -> unit
+val store : t -> string -> unit
