@@ -262,7 +262,7 @@ let get p =
   | Some value -> value
   | None -> raise Not_found
 
-(** Replace paramter's value *)
+(** Replace parameter's value *)
 let set p value =
   p := Some value
 
@@ -271,19 +271,11 @@ let set p value =
 
 let default_default_table_size = 50
 
-type typedparam =
-  Int of int parameter
-| Int64 of int64 parameter
-| Bool of bool parameter
-| String of string parameter
-| Float of float parameter
+type setter = string option -> unit
+type getter = bool -> string option option
+type entry =  Unhandled of string option | Handled of setter * getter
 
-type tablevalue =
-| Untyped of string option list
-| Simple of typedparam
-
-type t = (string, tablevalue) Hashtbl.t
-type table = t
+type t = (string, entry) Hashtbl.t
 
 
 (* Pretty printing *)
@@ -327,27 +319,12 @@ module Printer = struct
 
   let print_pair f (name,value) = 
     match value with
-    | Simple (Int {contents=Some value}) ->
-      fprintf f "@,@[<hov 2>%s =@ %d@]" name value
-    | Simple (Int64 {contents=Some value}) ->
-      fprintf f "@,@[<hov 2>%s =@ %s@]" name (Int64.to_string value)
-    | Simple (Bool {contents=Some value}) ->
-      fprintf f "@,@[<hov 2>%s =@ %B@]" name value
-    | Simple (Float {contents=Some value}) ->
-      fprintf f "@,@[<hov 2>%s =@ %f@]" name value
-    | Simple (String {contents=Some value}) ->
+    | None ->
+      fprintf f "@,@[<hov 2>%s@]" name
+    | Some value ->
       fprintf f "@,@[<hov 2>%s =@ %a@]" name print_value_string value
-    | Simple _ ->
-      ()
-    | Untyped l ->
-      let print s =
-        match s with
-        | Some s -> fprintf f "@,@[<hov 2>%s=%s@]" name s
-        | None -> fprintf f "@,@[<hov 2>%s@]" name
-      in
-        List.iter print (List.rev l)
   
-  let print formatter table =
+  let print ?(default=false) formatter table =
     let sections = Hashtbl.create 10 in
     let add_section name value =
       let section,name =
@@ -359,7 +336,15 @@ module Printer = struct
         else
           Hashtbl.add sections section [name,value]
     in
-      Hashtbl.iter add_section table;
+    let f name value =
+      match value with
+      | Unhandled value -> add_section name value
+      | Handled (_,getter) ->
+        match getter default with
+        | None -> ()
+        | Some value -> add_section name value 
+    in
+      Hashtbl.iter f table;
     let print_section section pairs =
       fprintf formatter "@[<v 2>[%s]" section;
       List.iter (print_pair formatter) (List.rev pairs);
@@ -370,9 +355,63 @@ end
 
 (* All the rest *)
 
+
+
 (** Make a configuration table *)
 let make ?(size=default_default_table_size) () =
   Hashtbl.create size
+
+let register tbl name setter getter =
+  if Hashtbl.mem tbl name then
+    match Hashtbl.find tbl name with
+    | Unhandled v ->
+      setter v;
+      Hashtbl.replace tbl name (Handled (setter,getter))
+    | Handled _ ->
+      failwith "already use"
+  else
+    Hashtbl.add tbl name (Handled (setter,getter))
+
+let load_one t name valueopt =
+  if Hashtbl.mem t name then
+    match Hashtbl.find t name with
+    | Handled (setter,_) -> setter valueopt
+    | Unhandled _ -> Hashtbl.replace t name (Unhandled valueopt)
+  else
+    Hashtbl.add t name (Unhandled valueopt)
+
+let load_channel t channel =
+  Parser.parse_channel (load_one t) channel
+
+let load_file t filepath =
+  load_channel t (open_in filepath)
+
+let load t stream =
+  Parser.parse_stream (load_one t) stream
+
+let print = Printer.print
+
+let store_channel t channel =
+  Printer.print (Format.formatter_of_out_channel channel) t
+
+let store t filepath =
+  store_channel t (open_out filepath)
+
+exception Undefined
+
+module type PARAM = sig
+  type t
+  val get : unit -> t
+  val set : t -> unit
+end
+
+module type CONVERTER = sig
+  type t
+  val of_raw : string option -> t
+  val to_raw : t -> string option
+end
+
+(******************************************************************************)
 
 (** Conversion *)
 let bool_convert s =
@@ -409,103 +448,136 @@ let float_convert s =
   with Invalid_argument _ ->
     invalid_arg "invalid float value"
 
-let get_param t (wrap, unwrap, make) name =
-  if Hashtbl.mem t name then
-    match Hashtbl.find t name with
-    | Untyped l ->
-      let param = make l in
-        Hashtbl.replace t name (wrap param);
-        param
-    | wrapped_param ->
-      unwrap wrapped_param
-  else
-    let param = make [] in
-      Hashtbl.replace t name (wrap param);
-      param  
+(** Modular parameterization *)
+    
+module type CONFIG = sig
 
-let mk_generic t (wrap, unwrap, make) name default_value =
-  let param = get_param t (wrap, unwrap, make) name in
-    if !param = None then
-      param := default_value;
-    param
+  module String (S : sig
+    val name : string
+    val default : string option
+  end) : PARAM with type t = string
 
-let make_unique convert values =
-  let initial_value = match values with
-    | [] -> None
-    | head :: _ -> Some (convert head)
-  in
-    ref initial_value
+  module Int (S : sig
+    val name : string
+    val default : int option
+  end) : PARAM with type t = int
 
-let make_list convert values =
-  let values = List.rev_map (convert values) in
-    ref values
+  module Int64 (S : sig
+    val name : string
+    val default : int64 option
+  end) : PARAM with type t = int64
 
-let wrap_int p = Simple (Int p)
-let wrap_int64 p = Simple (Int64 p)
-let wrap_bool p = Simple (Bool p)
-let wrap_float p = Simple (Float p)
-let wrap_string p = Simple (String p)
+  module Float (S : sig
+    val name : string
+    val default : float option
+  end) : PARAM with type t = float
 
-let unwrap_int tp =
-  match tp with
-  | Simple (Int p) -> p 
-  | _ -> failwith "type error"
-let unwrap_int64 tp =
-  match tp with
-  | Simple (Int64 p) -> p 
-  | _ -> failwith "type error"
-let unwrap_bool tp =
-  match tp with
-  | Simple (Bool p) -> p 
-  | _ -> failwith "type error"
-let unwrap_float tp =
-  match tp with
-  | Simple (Float p) -> p 
-  | _ -> failwith "type error"
-let unwrap_string tp =
-  match tp with
-  | Simple (String p) -> p 
-  | _ -> failwith "type error"
+  module Bool (S : sig
+    val name : string
+    val default : bool option
+  end) : PARAM with type t = bool
 
+end
+    
+module Make (T : sig
+  val table : t
+end) = struct
 
-let mk_int t ?default name =
-  mk_generic t (wrap_int, unwrap_int, make_unique int_convert) name default
-let mk_int64 t ?default name =
-  mk_generic t (wrap_int64, unwrap_int64, make_unique int64_convert) name default
-let mk_bool t ?default name =
-  mk_generic t (wrap_bool, unwrap_bool, make_unique bool_convert) name default
-let mk_float t ?default name =
-  mk_generic t (wrap_float, unwrap_float, make_unique float_convert) name default
-let mk_string t ?default name =
-  mk_generic t (wrap_string, unwrap_string, make_unique string_convert) name default
+let register = register T.table
 
-let update_simple tp valueopt =
-  match tp with
-  | Int p -> p := Some (int_convert valueopt)
-  | Int64 p -> p := Some (int64_convert valueopt)
-  | Bool p -> p := Some (bool_convert valueopt)
-  | Float p -> p := Some (float_convert valueopt)
-  | String p -> p := Some (string_convert valueopt)
+module Simple (C : CONVERTER) (S : sig
+    val name : string
+    val default : C.t option
+  end) = struct
 
-let load_one t name valueopt =
-  if Hashtbl.mem t name then
-    match Hashtbl.find t name with
-    | Untyped l -> Hashtbl.replace t name (Untyped (valueopt :: l))
-    | Simple tp -> update_simple tp valueopt
-  else
-    Hashtbl.add t name (Untyped [valueopt])
+  type t = C.t
 
-let load_channel t channel =
-  Parser.parse_channel (load_one t) channel
-let load_file t filepath =
-  load_channel t (open_in filepath)
-let load t stream =
-  Parser.parse_stream (load_one t) stream
+  let value = ref None
 
-let print = Printer.print
+  let get () =
+    match !value with
+    | Some v -> v
+    | None ->
+      match S.default with
+      | Some d -> d
+      | None ->
+        raise Undefined
 
-let store_channel t channel =
-  Printer.print (Format.formatter_of_out_channel channel) t
+  let set v =
+    value := Some v
 
-let store t filepath =
-  store_channel t (open_out filepath)
+  let set_raw s =
+    set (C.of_raw s)    
+
+  let get_raw default =
+    match !value with
+    | Some v -> Some (C.to_raw v)
+    | None ->
+      if default then
+        match S.default with
+        | Some v -> Some (C.to_raw v)
+        | None -> None
+      else
+        None
+
+  let () =
+    register S.name set_raw get_raw
+end
+
+module BoolConv = struct
+  type t = bool
+  let of_raw = bool_convert
+  let to_raw b =
+    Some (if b then "true" else "false")
+end
+
+module IntConv = struct
+  type t = int
+  let of_raw = int_convert
+  let to_raw i = Some (string_of_int i)
+end
+
+module Int64Conv = struct
+  type t = int64
+  let of_raw = int64_convert
+  let to_raw i = Some (Int64.to_string i)
+end
+
+module FloatConv = struct
+  type t = float
+  let of_raw = float_convert
+  let to_raw f = Some (string_of_float f)
+end
+
+module StringConv = struct
+  type t = string
+  let of_raw = string_convert
+  let to_raw s = Some s
+end
+
+module Bool (S : sig
+  val name : string
+  val default : bool option
+end) = Simple (BoolConv) (S)
+
+module Int (S : sig
+  val name : string
+  val default : int option
+end) = Simple (IntConv) (S)
+
+module Int64 (S : sig
+  val name : string
+  val default : int64 option
+end) = Simple (Int64Conv) (S)
+
+module Float (S : sig
+  val name : string
+  val default : float option
+end) = Simple (FloatConv) (S)
+
+module String (S : sig
+  val name : string
+  val default : string option
+end) = Simple (StringConv) (S)
+
+end

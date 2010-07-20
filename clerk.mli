@@ -28,7 +28,6 @@ val set : 'a parameter -> 'a -> unit
 
 (** Configuration table type*)
 type t
-type table = t
 
 (** Parser module *)
 module Parser :
@@ -45,14 +44,6 @@ module Parser :
 (** Make a configuration table. Optional hint size. *)
 val make : ?size:int -> unit -> t
 
-(** Extracting parameters *)
-
-val mk_bool : t -> ?default:bool -> string -> bool parameter
-val mk_string : t -> ?default:string -> string -> string parameter
-val mk_int : t -> ?default:int -> string -> int parameter
-val mk_int64 : t -> ?default:int64 -> string -> int64 parameter
-val mk_float : t -> ?default:float -> string -> float parameter
-
 (** Loading *)
 
 (** Load configurations from an input channel into a configuration table *)
@@ -64,7 +55,46 @@ val load : t -> char Stream.t -> unit
 
 (** Printing and storing *)
 
-val print : Format.formatter -> t -> unit
+val print : ?default:bool -> Format.formatter -> t -> unit
 
 val store_channel : t -> out_channel -> unit
 val store : t -> string -> unit
+
+module type PARAM = sig
+  type t
+  val get : unit -> t
+  val set : t -> unit
+end
+
+module type CONFIG = sig
+
+  module String (S : sig
+    val name : string
+    val default : string option
+  end) : PARAM with type t = string
+
+  module Int (S : sig
+    val name : string
+    val default : int option
+  end) : PARAM with type t = int
+
+  module Int64 (S : sig
+    val name : string
+    val default : int64 option
+  end) : PARAM with type t = int64
+
+  module Float (S : sig
+    val name : string
+    val default : float option
+  end) : PARAM with type t = float
+
+  module Bool (S : sig
+    val name : string
+    val default : bool option
+  end) : PARAM with type t = bool
+
+end
+
+module Make (S : sig
+  val table : t
+end) : CONFIG
