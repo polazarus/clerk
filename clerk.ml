@@ -397,7 +397,7 @@ let store_channel t channel =
 let store t filepath =
   store_channel t (open_out filepath)
 
-exception Undefined
+exception Undefined of string
 
 module type PARAM = sig
   type t
@@ -501,7 +501,7 @@ module Simple (C : CONVERTER) (S : sig
       match S.default with
       | Some d -> d
       | None ->
-        raise Undefined
+        raise (Undefined S.name)
 
   let set v =
     value := Some v
