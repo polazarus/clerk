@@ -384,7 +384,9 @@ let load_channel t channel =
   Parser.parse_channel (load_one t) channel
 
 let load_file t filepath =
-  load_channel t (open_in filepath)
+  let ic = open_in filepath in
+  load_channel t ic;
+  close_in ic
 
 let load t stream =
   Parser.parse_stream (load_one t) stream
@@ -395,7 +397,9 @@ let store_channel t channel =
   Printer.print (Format.formatter_of_out_channel channel) t
 
 let store t filepath =
-  store_channel t (open_out filepath)
+  let oc = open_out filepath in
+  store_channel t oc;
+  close_out oc
 
 exception Undefined of string
 
