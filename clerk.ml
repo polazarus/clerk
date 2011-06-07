@@ -396,7 +396,7 @@ let print = Printer.print
 let store_channel t channel =
   Printer.print (Format.formatter_of_out_channel channel) t
 
-let store t filepath =
+let store_file t filepath =
   let oc = open_out filepath in
   store_channel t oc;
   close_out oc

@@ -58,7 +58,7 @@ val load : t -> char Stream.t -> unit
 val print : ?default:bool -> Format.formatter -> t -> unit
 
 val store_channel : t -> out_channel -> unit
-val store : t -> string -> unit
+val store_file : t -> string -> unit
 
 module type PARAM = sig
   type t
